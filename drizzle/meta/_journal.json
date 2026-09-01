@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1788021096500,
+      "tag": "0000_oval_karnak",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788021995207,
+      "tag": "0001_true_hex",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788030742208,
+      "tag": "0002_faithful_skrulls",
+      "breakpoints": true
+    }
+  ]
+}
