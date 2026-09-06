@@ -23,7 +23,7 @@ See **[docs/usage.md](docs/usage.md)** for installation, everyday commands, rete
 The experimental v0.1 release supports macOS and requires Node.js 22.19 or newer:
 
 ```bash
-npm install -g https://github.com/minuscule-labs/minu-session-store/releases/download/v0.1.0/minuscule-labs-session-store-0.1.0.tgz
+npm install -g https://github.com/minuscule-labs/minu-session-store/releases/download/v0.1.1/minuscule-labs-session-store-0.1.1.tgz
 minu-sessions --help
 ```
 
@@ -66,6 +66,7 @@ minu-sessions configure pi \
   --profile <aws-profile>
 
 minu-sessions doctor
+minu-sessions update --check
 
 minu-sessions sessions list
 minu-sessions sessions list --search "auth"

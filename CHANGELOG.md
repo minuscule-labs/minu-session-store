@@ -4,9 +4,17 @@ All notable changes to MinuSessionStore will be documented here. The project fol
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-06
+
 ### Added
 
+- Read-only `minu-sessions update --check` against the latest GitHub release.
+- Checksum-verified `minu-sessions update` for writable global npm installations, with safe restart of a running LaunchAgent daemon.
 - Explicit uninstall documentation separating the program, local user data, Pi-owned sessions, AWS credentials, and versioned cloud archives.
+
+### Fixed
+
+- Treat an early-closing stdout pipe as normal termination instead of reporting `EPIPE`.
 
 ## [0.1.0] - 2026-09-01
 

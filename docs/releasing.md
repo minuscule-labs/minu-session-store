@@ -50,9 +50,11 @@ Never publish a real configuration file, SQLite catalog, Pi session, AWS identif
 4. Tag the commit, for example `v0.1.0`.
 5. Push the tag.
 6. Allow the release workflow to verify the package, create the `.tgz` and checksum, and publish the GitHub release.
-7. Install the published artifact and run a final smoke test.
-8. Publish to npm only from a separately configured trusted workflow.
-9. Update the Homebrew formula only after its source artifact is immutable.
+7. Confirm the release contains both the versioned `.tgz` and `SHA256SUMS`; these names are part of the CLI update contract.
+8. Install the published artifact and run a final smoke test, including `minu-sessions update --check`.
+9. For v0.1.1, use the documented manual bootstrap because v0.1.0 has no update command. For later releases, update from the previous release with `minu-sessions update`, verify the version output, and confirm a previously running daemon restarts against the new package.
+10. Publish to npm only from a separately configured trusted workflow.
+11. Update the Homebrew formula only after its source artifact is immutable.
 
 ## Homebrew direction
 

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
+import packageMetadata from "../package.json" with { type: "json" };
 import { SessionCatalog } from "../src/catalog/session-catalog.js";
 import { createConfig, writeConfig } from "../src/config/config.js";
 import type { CapturedSession } from "../src/core/contracts.js";
@@ -20,7 +21,7 @@ afterEach(async () => {
 describe("catalog CLI commands", () => {
   it("reports the package version", async () => {
     const version = await runCli(["--version"]);
-    expect(version.stdout.trim()).toBe("0.1.0");
+    expect(version.stdout.trim()).toBe(packageMetadata.version);
   });
 
   it("filters sessions and locates an exact stored object", async () => {

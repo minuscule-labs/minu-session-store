@@ -16,7 +16,7 @@ Linux can run `minu-sessions daemon run` in the foreground, but service installa
 Install the experimental v0.1 GitHub release:
 
 ```bash
-npm install -g https://github.com/minuscule-labs/minu-session-store/releases/download/v0.1.0/minuscule-labs-session-store-0.1.0.tgz
+npm install -g https://github.com/minuscule-labs/minu-session-store/releases/download/v0.1.1/minuscule-labs-session-store-0.1.1.tgz
 ```
 
 To develop from a source checkout instead:
@@ -34,6 +34,27 @@ minu-sessions help
 ```
 
 After moving the repository or changing/removing the Node.js installation used during setup, rebuild, relink, and reinstall the LaunchAgent. Its plist records absolute paths to Node and the installed `minu-sessions` executable.
+
+## Check for and install updates
+
+Check the latest GitHub release without changing the installation:
+
+```bash
+minu-sessions update --check
+minu-sessions update --check --json
+```
+
+Install an available release:
+
+```bash
+minu-sessions update
+```
+
+The updater downloads the release package and `SHA256SUMS`, verifies the package checksum, and invokes global npm with lifecycle scripts disabled. If the LaunchAgent daemon is running, it is restarted after a successful installation so it loads the new code. Configuration, the SQLite catalog, Pi sessions, AWS credentials, and S3 objects are not changed.
+
+Self-update is intentionally limited to writable global npm installations, which are the supported GitHub-release installation method. A source checkout, `npm link`, unknown package manager, or non-writable installation is never modified; the command instead prints the release page for manual installation. There are no automatic or daemon-initiated update checks, and check failures do not affect archival.
+
+Version 0.1.0 does not contain the update command. Install 0.1.1 manually using the command in the preceding section; subsequent compatible releases can use `minu-sessions update`.
 
 ## Provision a new S3 bucket
 

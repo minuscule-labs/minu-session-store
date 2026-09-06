@@ -46,7 +46,18 @@ import {
   verifyStorageObjects,
   type StorageVerificationReport,
 } from "./operations/storage-verifier.js";
+import {
+  checkForUpdate,
+  compareVersions,
+  installUpdate,
+  type UpdateCheck,
+} from "./operations/updater.js";
 import { createObjectStore, createRuntime } from "./runtime/create-runtime.js";
+
+process.stdout.on("error", (error) => {
+  if ("code" in error && error.code === "EPIPE") process.exit(0);
+  throw error;
+});
 
 async function main(args: string[]): Promise<number> {
   const [command, ...commandArgs] = args;
@@ -71,6 +82,8 @@ async function main(args: string[]): Promise<number> {
       return doctorCommand(commandArgs);
     case "daemon":
       return daemonCommand(commandArgs);
+    case "update":
+      return updateCommand(commandArgs);
     case "--version":
     case "-v":
       process.stdout.write(`${packageMetadata.version}\n`);
@@ -84,6 +97,75 @@ async function main(args: string[]): Promise<number> {
     default:
       throw new Error(`Unknown command: ${command}`);
   }
+}
+
+async function updateCommand(args: string[]): Promise<number> {
+  const parsed = parseArgs({
+    args,
+    options: {
+      check: { type: "boolean", default: false },
+      json: { type: "boolean", default: false },
+    },
+  });
+  const update = await checkForUpdate({ currentVersion: packageMetadata.version });
+  if (parsed.values.check || !update.updateAvailable) {
+    printUpdateCheck(update, parsed.values.json);
+    return 0;
+  }
+
+  const service = process.platform === "darwin"
+    ? new LaunchdService({ configPath: defaultConfigPath() })
+    : undefined;
+  const shouldRestartDaemon = (await service?.isRunning()) ?? false;
+
+  let installed;
+  try {
+    installed = await installUpdate(update);
+  } catch (error) {
+    throw new Error(`${errorMessage(error)}\nUpdate manually from ${update.releaseUrl}`);
+  }
+
+  if (shouldRestartDaemon && service) {
+    try {
+      await service.start();
+    } catch (error) {
+      throw new Error(
+        `Updated MinuSessionStore to ${installed.version}, but the session daemon could not be restarted: ${errorMessage(error)}\n` +
+          "Restart it manually with: minu-sessions daemon start",
+      );
+    }
+  }
+
+  if (parsed.values.json) {
+    process.stdout.write(
+      `${JSON.stringify({ ...installed, daemonRestarted: shouldRestartDaemon })}\n`,
+    );
+  } else {
+    process.stdout.write(
+      `Updated MinuSessionStore from ${installed.previousVersion} to ${installed.version}.\n`,
+    );
+    if (shouldRestartDaemon) process.stdout.write("The session daemon was restarted.\n");
+  }
+  return 0;
+}
+
+function printUpdateCheck(update: UpdateCheck, json: boolean): void {
+  if (json) {
+    process.stdout.write(`${JSON.stringify(update, null, 2)}\n`);
+    return;
+  }
+  if (update.updateAvailable) {
+    process.stdout.write(
+      `MinuSessionStore ${update.latestVersion} is available (installed: ${update.currentVersion}).\n`,
+    );
+    process.stdout.write(`Release: ${update.releaseUrl}\n`);
+    process.stdout.write("Run `minu-sessions update` to install it.\n");
+    return;
+  }
+  const qualifier = compareVersions(update.currentVersion, update.latestVersion) > 0
+    ? ` (latest release: ${update.latestVersion})`
+    : "";
+  process.stdout.write(`MinuSessionStore ${update.currentVersion} is up to date${qualifier}.\n`);
 }
 
 async function configureCommand(args: string[]): Promise<number> {
@@ -1099,6 +1181,7 @@ function printUsage(): void {
   process.stdout.write(`minu-sessions commands:\n\n`);
   process.stdout.write(`  configure pi --bucket <bucket> --region <region> [--profile name]\n`);
   process.stdout.write(`  doctor [--json]\n`);
+  process.stdout.write(`  update [--check] [--json]\n`);
   process.stdout.write(`  storage s3 provision --bucket <bucket> --region <region> [--profile name]\n`);
   process.stdout.write(`  storage locate <session-id> [--version N] [--json]\n`);
   process.stdout.write(`  storage verify [session-id] [--sample N | --all] [--json]\n`);

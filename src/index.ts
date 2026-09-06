@@ -16,4 +16,5 @@ export * from "./daemon/session-daemon.js";
 export * from "./operations/doctor.js";
 export * from "./operations/storage-reconciler.js";
 export * from "./operations/storage-verifier.js";
+export * from "./operations/updater.js";
 export * from "./runtime/create-runtime.js";
