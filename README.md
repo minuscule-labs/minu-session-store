@@ -16,7 +16,7 @@ The local-first v0.1 MVP is operational on macOS: direct private-S3 archival, lo
 
 The project is currently under an MVP scope freeze while normal operation, resource usage, retention, and recovery signals are observed. See [docs/stabilization.md](docs/stabilization.md) for the checks and exit criteria.
 
-See **[docs/usage.md](docs/usage.md)** for installation, everyday commands, retention, backups, restart behavior, file locations, and troubleshooting. See [docs/releasing.md](docs/releasing.md) for the guarded npm and Homebrew release checklist.
+See **[docs/usage.md](docs/usage.md)** for installation, everyday commands, retention, backups, restart behavior, file locations, and troubleshooting. See [docs/uninstall.md](docs/uninstall.md) before removing local or cloud data, and [docs/releasing.md](docs/releasing.md) for the guarded npm and Homebrew release checklist.
 
 ## Install
 

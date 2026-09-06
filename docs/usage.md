@@ -330,6 +330,10 @@ Users may create unrelated tables and views. Do not directly modify MinuSessionS
 
 Configuration, database, backups, temporary snapshots, and the control socket are user-private.
 
+## Uninstall
+
+Removing the LaunchAgent or npm package preserves configuration, the SQLite catalog, Pi sessions, AWS credentials, and S3 objects. Follow [uninstall.md](uninstall.md) when removing local data or separately destroying the cloud archive.
+
 ## Troubleshooting
 
 Start with:

@@ -4,6 +4,10 @@ All notable changes to MinuSessionStore will be documented here. The project fol
 
 ## [Unreleased]
 
+### Added
+
+- Explicit uninstall documentation separating the program, local user data, Pi-owned sessions, AWS credentials, and versioned cloud archives.
+
 ## [0.1.0] - 2026-09-01
 
 ### Added
