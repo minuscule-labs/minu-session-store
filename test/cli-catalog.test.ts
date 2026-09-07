@@ -117,6 +117,21 @@ describe("catalog CLI commands", () => {
       },
     });
     expect(new URL(location.consoleUrl).searchParams.get("versionId")).toBe("storage-version-1");
+
+    await expect(
+      runCli(["sessions", "restore", prepared.sessionId, "--config", configPath]),
+    ).rejects.toThrow("sessions restore requires --output");
+    await expect(
+      runCli([
+        "sessions",
+        "restore",
+        "external-session-1",
+        "--output",
+        join(directory, "not-restored.jsonl"),
+        "--config",
+        configPath,
+      ]),
+    ).rejects.toThrow("requires the catalog session ID");
   });
 });
 

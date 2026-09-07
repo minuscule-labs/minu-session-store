@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -158,6 +158,49 @@ describe("S3ObjectStore", () => {
     ).resolves.toEqual({
       status: "already_exists",
       objectKey: `sessions/local/ses_123/raw/${"b".repeat(64)}.jsonl`,
+    });
+  });
+
+  it("retrieves and validates one exact S3 object version", async () => {
+    const checksum = "f".repeat(64);
+    async function* body() {
+      yield Buffer.from("test");
+    }
+    const send = vi.fn(async (command: unknown) => {
+      if (command instanceof GetObjectCommand) {
+        return {
+          Body: body(),
+          ContentLength: 4,
+          ContentType: "application/x-ndjson",
+          ChecksumSHA256: sha256HexToBase64(checksum),
+          ServerSideEncryption: "AES256",
+          VersionId: "s3-version-3",
+        };
+      }
+      throw new Error("Unexpected command");
+    });
+    const store = new S3ObjectStore({
+      bucket: "sessions",
+      client: { send } as unknown as S3Client,
+    });
+    const objectKey = `sessions/local/ses_123/raw/${checksum}.jsonl`;
+
+    const retrieved = await store.retrieveVersion({
+      objectKey,
+      checksum,
+      byteSize: 4,
+      contentType: "application/x-ndjson",
+      storageVersionId: "s3-version-3",
+    });
+
+    const received: Buffer[] = [];
+    for await (const chunk of retrieved.content) received.push(Buffer.from(chunk));
+    expect(Buffer.concat(received).toString()).toBe("test");
+    expect((send.mock.calls[0]?.[0] as GetObjectCommand).input).toEqual({
+      Bucket: "sessions",
+      Key: objectKey,
+      VersionId: "s3-version-3",
+      ChecksumMode: "ENABLED",
     });
   });
 

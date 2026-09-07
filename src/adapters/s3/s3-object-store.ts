@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { fromIni } from "@aws-sdk/credential-providers";
 import {
   DeleteObjectCommand,
+  GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -11,6 +12,8 @@ import {
 import { normalizeSha256Hex, sha256HexToBase64 } from "../../core/checksum.js";
 import type {
   DeleteStoredObjectVersionInput,
+  RetrieveStoredObjectVersionInput,
+  RetrievedObjectVersion,
   StoredObject,
   StoreSnapshotInput,
   VersionedObjectStore,
@@ -128,6 +131,53 @@ export class S3ObjectStore implements VersionedObjectStore {
       throw new Error(`S3 object KMS key mismatch for ${input.objectKey}`);
     }
     return response.VersionId === undefined ? {} : { storageVersionId: response.VersionId };
+  }
+
+  async retrieveVersion(
+    input: RetrieveStoredObjectVersionInput,
+  ): Promise<RetrievedObjectVersion> {
+    assertSafeObjectKey(input.objectKey);
+    if (!input.storageVersionId.trim()) throw new Error("S3 version ID is required for retrieval");
+    const response = await this.client.send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: input.objectKey,
+        VersionId: input.storageVersionId,
+        ChecksumMode: "ENABLED",
+      }),
+    );
+    try {
+      if (response.VersionId !== input.storageVersionId) {
+        throw new Error(`S3 object VersionId mismatch for ${input.objectKey}`);
+      }
+      if (response.ContentLength !== input.byteSize) {
+        throw new Error(`S3 object size mismatch for ${input.objectKey}`);
+      }
+      if (response.ChecksumSHA256 !== sha256HexToBase64(input.checksum)) {
+        throw new Error(`S3 object SHA-256 mismatch for ${input.objectKey}`);
+      }
+      if (response.ContentType !== input.contentType) {
+        throw new Error(`S3 object content type mismatch for ${input.objectKey}`);
+      }
+      if (response.ServerSideEncryption !== this.serverSideEncryption) {
+        throw new Error(`S3 object encryption mismatch for ${input.objectKey}`);
+      }
+      if (this.kmsKeyId && response.SSEKMSKeyId !== this.kmsKeyId) {
+        throw new Error(`S3 object KMS key mismatch for ${input.objectKey}`);
+      }
+      if (!response.Body || !(Symbol.asyncIterator in response.Body)) {
+        throw new Error(`S3 object body is unavailable for ${input.objectKey}`);
+      }
+    } catch (error) {
+      if (response.Body && "destroy" in response.Body && typeof response.Body.destroy === "function") {
+        response.Body.destroy();
+      }
+      throw error;
+    }
+    return {
+      storageVersionId: input.storageVersionId,
+      content: response.Body as AsyncIterable<Uint8Array>,
+    };
   }
 
   async deleteVersion(input: DeleteStoredObjectVersionInput): Promise<void> {

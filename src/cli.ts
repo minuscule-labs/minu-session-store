@@ -38,6 +38,7 @@ import { LaunchdService, launchdServicePaths } from "./daemon/launchd-service.js
 import { maintainDaemonLogs } from "./daemon/log-maintenance.js";
 import { SessionDaemon, type DaemonScanSummary } from "./daemon/session-daemon.js";
 import { runDoctor } from "./operations/doctor.js";
+import { restoreSessionObject } from "./operations/session-restorer.js";
 import {
   reconcileStorageVersionIds,
   type StorageVersionReconciliationReport,
@@ -480,8 +481,8 @@ async function dryRunSync(
 
 async function sessionsCommand(args: string[]): Promise<number> {
   const [action, ...actionArgs] = args;
-  if (action !== "list" && action !== "show") {
-    throw new Error("sessions requires one of: list, show");
+  if (action !== "list" && action !== "show" && action !== "restore") {
+    throw new Error("sessions requires one of: list, show, restore");
   }
   const parsed = parseArgs({
     args: actionArgs,
@@ -495,6 +496,9 @@ async function sessionsCommand(args: string[]): Promise<number> {
       device: { type: "string" },
       source: { type: "string" },
       versions: { type: "string" },
+      version: { type: "string" },
+      output: { type: "string", short: "o" },
+      overwrite: { type: "boolean", default: false },
     },
   });
   const config = await loadConfig(parsed.values.config);
@@ -527,7 +531,40 @@ async function sessionsCommand(args: string[]): Promise<number> {
     }
 
     const identifier = parsed.positionals[0];
-    if (!identifier) throw new Error("sessions show requires a session ID or external ID");
+    if (!identifier) throw new Error(`sessions ${action} requires a session ID or external ID`);
+    if (action === "restore") {
+      if (!parsed.values.output) throw new Error("sessions restore requires --output");
+      const target = await catalog.locateSessionObject(
+        config.ownerId,
+        identifier,
+        parsed.values.version === undefined
+          ? undefined
+          : positiveInteger(parsed.values.version, "version"),
+      );
+      if (!target) throw new Error(`Stored session object not found: ${identifier}`);
+      if (target.sessionId !== identifier) {
+        throw new Error(
+          `sessions restore requires the catalog session ID (${target.sessionId}), not an external ID`,
+        );
+      }
+      const restored = await restoreSessionObject({
+        target,
+        objectStore: createObjectStore(config),
+        destinationPath: parsed.values.output,
+        overwrite: parsed.values.overwrite,
+      });
+      if (parsed.values.json) {
+        process.stdout.write(`${JSON.stringify(restored, null, 2)}\n`);
+      } else {
+        process.stdout.write(
+          `Restored ${restored.sessionId} version ${restored.version} to ${restored.destinationPath}\n`,
+        );
+        process.stdout.write(`SHA-256: ${restored.checksum}\n`);
+        process.stdout.write(`S3 VersionId: ${restored.storageVersionId}\n`);
+      }
+      return 0;
+    }
+
     const session = await catalog.getSession(
       config.ownerId,
       identifier,
@@ -1189,6 +1226,7 @@ function printUsage(): void {
     `  sessions list [--search text] [--harness name] [--device id] [--source id] [--limit N] [--json]\n`,
   );
   process.stdout.write(`  sessions show <session-id> [--versions N] [--json]\n`);
+  process.stdout.write(`  sessions restore <session-id> --output path [--version N] [--overwrite] [--json]\n`);
   process.stdout.write(`  discover [--json]\n`);
   process.stdout.write(`  sync [--force] [--json]\n`);
   process.stdout.write(`  sync --dry-run [--limit N] [--json]\n`);

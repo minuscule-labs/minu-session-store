@@ -4,6 +4,14 @@ All notable changes to MinuSessionStore will be documented here. The project fol
 
 ## [Unreleased]
 
+### Added
+
+- Exact-version session restore with streaming S3 retrieval, local size and SHA-256 verification, private temporary files, atomic placement, and explicit overwrite protection.
+
+### Fixed
+
+- Clean `dist/` before builds so local packages cannot include stale output from another branch.
+
 ## [0.1.1] - 2026-09-06
 
 ### Added

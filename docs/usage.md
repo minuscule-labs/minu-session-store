@@ -207,7 +207,36 @@ minu-sessions reconcile apply --all --yes
 
 Apply verifies the object at its current immutable key, captures the observed S3 `VersionId`, verifies that exact version again, and only then records it if the catalog field is still empty. It never overwrites an existing `VersionId`. The default batch is 100 objects; `--all` can take time and incur S3 request charges.
 
-The CLI shows metadata, checksums, sizes, verification times, and S3 keys. It does not download or print transcript content.
+The CLI shows metadata, checksums, sizes, verification times, and S3 keys. It does not print transcript content.
+
+## Restore an archived session
+
+Restore the latest retained snapshot to an explicit destination using the catalog session ID shown by `sessions list`:
+
+```bash
+minu-sessions sessions restore <session-id> \
+  --output ~/Documents/recovered-session.jsonl
+```
+
+Restore a specific snapshot version:
+
+```bash
+minu-sessions sessions restore <session-id> \
+  --version 3 \
+  --output ~/Documents/recovered-session-v3.jsonl
+```
+
+Restore requires the internal catalog session ID rather than a potentially ambiguous harness external ID. It always requests the exact cataloged S3 `VersionId`. It streams into a private temporary file beside the destination, verifies byte size and SHA-256, syncs the file, and only then publishes it atomically with `0600` permissions. A missing `VersionId`, deleted catalog object, truncated response, or checksum mismatch fails without publishing the destination.
+
+Existing paths are never replaced by default. Intentional replacement requires:
+
+```bash
+minu-sessions sessions restore <session-id> \
+  --output /reviewed/path/session.jsonl \
+  --overwrite
+```
+
+The command does not automatically place files in Pi's session directory or register them with Pi. Choose and review such a destination explicitly. Restore depends on the catalog's exact object metadata; rebuilding a lost catalog from S3 alone is not yet implemented, so continue making catalog backups. Restoring a `pending_deletion` object is allowed while its exact S3 version remains available, but it may race the configured retention deadline; restore important versions before that deadline or pin them through a future supported workflow.
 
 ## Daemon operation
 

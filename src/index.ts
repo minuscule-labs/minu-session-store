@@ -14,6 +14,7 @@ export * from "./daemon/launchd-service.js";
 export * from "./daemon/log-maintenance.js";
 export * from "./daemon/session-daemon.js";
 export * from "./operations/doctor.js";
+export * from "./operations/session-restorer.js";
 export * from "./operations/storage-reconciler.js";
 export * from "./operations/storage-verifier.js";
 export * from "./operations/updater.js";
