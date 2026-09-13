@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -29,11 +29,14 @@ describe("catalog CLI commands", () => {
     temporaryDirectories.push(directory);
     const databasePath = join(directory, "catalog.db");
     const configPath = join(directory, "config.json");
+    const sessionRoot = join(directory, "pi-sessions");
+    await mkdir(sessionRoot);
     await writeConfig(
       createConfig({
         bucket: "example-session-archive",
         region: "us-east-1",
         catalogUrl: `file:${databasePath}`,
+        sessionRoots: [sessionRoot],
       }),
       configPath,
     );
@@ -117,6 +120,68 @@ describe("catalog CLI commands", () => {
       },
     });
     expect(new URL(location.consoleUrl).searchParams.get("versionId")).toBe("storage-version-1");
+
+    await expect(
+      runCli(["sessions", "restore", prepared.sessionId, "--config", configPath]),
+    ).rejects.toThrow("sessions restore requires --output");
+    await expect(
+      runCli([
+        "sessions",
+        "restore",
+        "external-session-1",
+        "--output",
+        join(directory, "not-restored.jsonl"),
+        "--config",
+        configPath,
+      ]),
+    ).rejects.toThrow("requires the catalog session ID");
+
+    if (process.platform === "darwin") {
+      const rehydrationPlan = await runCli([
+        "sessions",
+        "rehydrate",
+        "plan",
+        prepared.sessionId,
+        "--to",
+        "pi",
+        "--json",
+        "--config",
+        configPath,
+      ]);
+      expect(JSON.parse(rehydrationPlan.stdout)).toMatchObject({
+        harness: "pi",
+        status: "ready",
+        sessionId: prepared.sessionId,
+        externalId: "external-session-1",
+        sessionObjectId: expect.any(String),
+        sessionRoot: await realpath(sessionRoot),
+        targetPath: expect.stringContaining("rehydrated_external-session-1.jsonl"),
+      });
+      await expect(
+        runCli([
+          "sessions",
+          "rehydrate",
+          "apply",
+          prepared.sessionId,
+          "--to",
+          "pi",
+          "--config",
+          configPath,
+        ]),
+      ).rejects.toThrow("requires the explicit --yes flag");
+      await expect(
+        runCli([
+          "sessions",
+          "rehydrate",
+          "plan",
+          "external-session-1",
+          "--to",
+          "pi",
+          "--config",
+          configPath,
+        ]),
+      ).rejects.toThrow("catalog session ID");
+    }
   });
 });
 

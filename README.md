@@ -72,6 +72,7 @@ minu-sessions sessions list
 minu-sessions sessions list --search "auth"
 minu-sessions sessions list --harness pi
 minu-sessions sessions show <session-id>
+minu-sessions sessions restore <session-id> --output ~/Documents/recovered-session.jsonl
 minu-sessions storage locate <session-id>
 minu-sessions storage verify --sample 20
 minu-sessions reconcile plan

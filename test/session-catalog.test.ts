@@ -124,7 +124,9 @@ describe("SessionCatalog", () => {
         sessionId: prepared.sessionId,
         harness: "pi",
         sourceInstallationId,
+        workingDirectory: "/workspace/project",
         version: expect.objectContaining({
+          originalFilename: "session.jsonl",
           version: 1,
           objectKey: `sessions/local/${prepared.sessionId}/raw/${captured.snapshot.checksum}.jsonl`,
           storageVersionId: "s3-version-1",
@@ -133,6 +135,10 @@ describe("SessionCatalog", () => {
       }),
     );
     await expect(catalog.locateSessionObject("local", "pi-session-1", 2)).resolves.toBeUndefined();
+    await expect(catalog.locateSessionObjectById("local", prepared.sessionId)).resolves.toEqual(
+      expect.objectContaining({ sessionId: prepared.sessionId }),
+    );
+    await expect(catalog.locateSessionObjectById("local", "pi-session-1")).resolves.toBeUndefined();
     await expect(
       catalog.listStorageObjectsForVerification({
         ownerId: "local",

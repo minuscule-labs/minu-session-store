@@ -4,6 +4,17 @@ All notable changes to MinuSessionStore will be documented here. The project fol
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-13
+
+### Added
+
+- Exact-version session restore with streaming S3 retrieval, local size and SHA-256 verification, private temporary files, atomic placement, and explicit overwrite protection.
+- macOS Pi session rehydration with metadata-only planning, exact snapshot verification, collision detection, and atomic installation into an existing Pi session root.
+
+### Fixed
+
+- Clean `dist/` before builds so local packages cannot include stale output from another branch.
+
 ## [0.1.1] - 2026-09-06
 
 ### Added

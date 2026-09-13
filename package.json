@@ -1,6 +1,6 @@
 {
   "name": "@minuscule-labs/session-store",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Local-first immutable archive and SQLite catalog for coding-agent sessions",
   "license": "Apache-2.0",
   "author": "Minuscule Labs",
@@ -42,7 +42,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "prepack": "npm run build",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

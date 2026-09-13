@@ -86,6 +86,19 @@ export type DeleteStoredObjectVersionInput = {
   storageVersionId: string;
 };
 
+export type RetrieveStoredObjectVersionInput = StoredObject & {
+  storageVersionId: string;
+};
+
+export type RetrievedObjectVersion = {
+  storageVersionId: string;
+  content: AsyncIterable<Uint8Array>;
+};
+
+export interface RetrievableObjectStore extends ObjectStore {
+  retrieveVersion(input: RetrieveStoredObjectVersionInput): Promise<RetrievedObjectVersion>;
+}
+
 export interface VersionedObjectStore extends ObjectStore {
   deleteVersion(input: DeleteStoredObjectVersionInput): Promise<void>;
 }
