@@ -39,6 +39,23 @@ describe("PiSessionSource", () => {
     expect(sessions.map((session) => session.formatVersion)).toEqual(["3", "3"]);
   });
 
+  it("resolves settings.json sessionDir relative to the Pi agent directory", async () => {
+    const agentDirectory = await createTemporaryDirectory();
+    const sessionDirectory = join(agentDirectory, "custom-sessions");
+    await mkdir(sessionDirectory);
+    await writeFile(join(agentDirectory, "settings.json"), '{"sessionDir":"custom-sessions"}\n');
+    const sessionPath = join(sessionDirectory, "session.jsonl");
+    await writeSession(sessionPath, { id: "configured-session", cwd: "/workspace/project" });
+
+    const source = new PiSessionSource({ agentDirectory });
+    await expect(collect(source.discover())).resolves.toEqual([
+      expect.objectContaining({
+        path: await realpath(sessionPath),
+        externalId: "configured-session",
+      }),
+    ]);
+  });
+
   it("captures exact bytes and extracts archival metadata", async () => {
     const root = await createTemporaryDirectory();
     const sessionPath = join(root, "session.jsonl");

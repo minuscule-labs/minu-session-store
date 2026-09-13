@@ -11,6 +11,7 @@ import {
   rm,
   unlink,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type { CatalogStorageLocation } from "../catalog/session-catalog.js";
 import type { RetrievableObjectStore } from "../core/contracts.js";
@@ -32,39 +33,82 @@ export type RestoredSessionObject = {
   destinationPath: string;
 };
 
+export type RetrieveVerifiedSessionObjectInput = {
+  target: CatalogStorageLocation;
+  objectStore: RetrievableObjectStore;
+  stagingDirectory?: string;
+  filename?: string;
+};
+
+export type VerifiedRestoredFile = {
+  path: string;
+  checksum: string;
+  byteSize: number;
+  storageVersionId: string;
+  dispose(): Promise<void>;
+};
+
 export async function restoreSessionObject(
   input: RestoreSessionObjectInput,
 ): Promise<RestoredSessionObject> {
-  const version = input.target.version;
-  if (version.storageStatus === "deleted") {
-    throw new Error("The selected session object has been deleted from storage");
-  }
-  if (!version.storageVersionId?.trim()) {
-    throw new Error("Restore requires an exact cataloged S3 VersionId");
-  }
+  assertRestorable(input.target);
 
   const destinationPath = resolve(input.destinationPath);
-  const destinationName = basename(destinationPath);
-  if (!destinationName) throw new Error("Restore destination must name a file");
+  const destinationName = fileName(destinationPath, "Restore destination must name a file");
   const parentDirectory = dirname(destinationPath);
   await mkdir(parentDirectory, { recursive: true, mode: 0o700 });
   if (!input.overwrite && (await pathExists(destinationPath))) {
     throw new Error(`Restore destination already exists: ${destinationPath}`);
   }
 
-  const temporaryDirectory = await mkdtemp(join(parentDirectory, ".minu-restore-"));
-  const temporaryPath = join(temporaryDirectory, destinationName);
+  const restored = await retrieveVerifiedSessionObject({
+    target: input.target,
+    objectStore: input.objectStore,
+    stagingDirectory: parentDirectory,
+    filename: destinationName,
+  });
+  try {
+    await publishVerifiedSessionObject({
+      restored,
+      destinationPath,
+      ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
+    });
+    return {
+      sessionId: input.target.sessionId,
+      externalId: input.target.externalId,
+      version: input.target.version.version,
+      storageVersionId: restored.storageVersionId,
+      checksum: restored.checksum,
+      byteSize: restored.byteSize,
+      destinationPath,
+    };
+  } finally {
+    await restored.dispose();
+  }
+}
+
+export async function retrieveVerifiedSessionObject(
+  input: RetrieveVerifiedSessionObjectInput,
+): Promise<VerifiedRestoredFile> {
+  assertRestorable(input.target);
+
+  const stagingRoot = resolve(input.stagingDirectory ?? tmpdir());
+  const temporaryDirectory = await mkdtemp(join(stagingRoot, ".minu-restore-"));
 
   try {
     await chmod(temporaryDirectory, 0o700);
+    const temporaryPath = join(
+      temporaryDirectory,
+      fileName(input.filename ?? "session", "Restore staging filename must name a file"),
+    );
     const retrieved = await input.objectStore.retrieveVersion({
-      objectKey: version.objectKey,
-      storageVersionId: version.storageVersionId,
-      checksum: version.checksum,
-      byteSize: version.byteSize,
-      contentType: version.contentType,
+      objectKey: input.target.version.objectKey,
+      storageVersionId: input.target.version.storageVersionId!,
+      checksum: input.target.version.checksum,
+      byteSize: input.target.version.byteSize,
+      contentType: input.target.version.contentType,
     });
-    if (retrieved.storageVersionId !== version.storageVersionId) {
+    if (retrieved.storageVersionId !== input.target.version.storageVersionId) {
       throw new Error("Object store returned a different storage version during restore");
     }
 
@@ -78,7 +122,7 @@ export async function restoreSessionObject(
         }
         const chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
         byteSize += chunk.byteLength;
-        if (byteSize > version.byteSize) {
+        if (byteSize > input.target.version.byteSize) {
           throw new Error("Restored object exceeds its cataloged byte size");
         }
         hash.update(chunk);
@@ -89,41 +133,74 @@ export async function restoreSessionObject(
       await file.close();
     }
 
-    if (byteSize !== version.byteSize) {
+    if (byteSize !== input.target.version.byteSize) {
       throw new Error(
-        `Restored object size mismatch: expected ${version.byteSize}, received ${byteSize}`,
+        `Restored object size mismatch: expected ${input.target.version.byteSize}, received ${byteSize}`,
       );
     }
     const checksum = hash.digest("hex");
-    if (checksum !== version.checksum.toLowerCase()) {
+    if (checksum !== input.target.version.checksum.toLowerCase()) {
       throw new Error(`Restored object SHA-256 mismatch for session ${input.target.sessionId}`);
     }
 
-    if (input.overwrite) {
-      await rename(temporaryPath, destinationPath);
-    } else {
-      try {
-        await link(temporaryPath, destinationPath);
-      } catch (error) {
-        if (isNodeError(error, "EEXIST")) {
-          throw new Error(`Restore destination already exists: ${destinationPath}`);
-        }
-        throw error;
-      }
-      await unlink(temporaryPath);
-    }
+    let disposed = false;
     return {
-      sessionId: input.target.sessionId,
-      externalId: input.target.externalId,
-      version: version.version,
-      storageVersionId: version.storageVersionId,
+      path: temporaryPath,
       checksum,
       byteSize,
-      destinationPath,
+      storageVersionId: retrieved.storageVersionId,
+      async dispose() {
+        if (disposed) return;
+        disposed = true;
+        await rm(temporaryDirectory, { recursive: true, force: true });
+      },
     };
-  } finally {
+  } catch (error) {
     await rm(temporaryDirectory, { recursive: true, force: true });
+    throw error;
   }
+}
+
+async function publishVerifiedSessionObject(input: {
+  restored: VerifiedRestoredFile;
+  destinationPath: string;
+  overwrite?: boolean;
+}): Promise<void> {
+  if (!input.overwrite && (await pathExists(input.destinationPath))) {
+    throw new Error(`Restore destination already exists: ${input.destinationPath}`);
+  }
+
+  if (input.overwrite) {
+    await rename(input.restored.path, input.destinationPath);
+    return;
+  }
+
+  try {
+    await link(input.restored.path, input.destinationPath);
+  } catch (error) {
+    if (isNodeError(error, "EEXIST")) {
+      throw new Error(`Restore destination already exists: ${input.destinationPath}`);
+    }
+    throw error;
+  }
+  await unlink(input.restored.path);
+}
+
+function assertRestorable(target: CatalogStorageLocation): asserts target is CatalogStorageLocation & {
+  version: CatalogStorageLocation["version"] & { storageVersionId: string };
+} {
+  if (target.version.storageStatus === "deleted") {
+    throw new Error("The selected session object has been deleted from storage");
+  }
+  if (!target.version.storageVersionId?.trim()) {
+    throw new Error("Restore requires an exact cataloged S3 VersionId");
+  }
+}
+
+function fileName(path: string, message: string): string {
+  const name = basename(path);
+  if (!name || name === "." || name === "..") throw new Error(message);
+  return name;
 }
 
 async function writeAll(file: Awaited<ReturnType<typeof open>>, buffer: Buffer): Promise<void> {

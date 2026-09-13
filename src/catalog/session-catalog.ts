@@ -126,6 +126,7 @@ export type RetentionPlan = {
 export type CatalogSessionVersion = {
   id: string;
   version: number;
+  originalFilename?: string;
   checksum: string;
   byteSize: number;
   objectKey: string;
@@ -143,6 +144,7 @@ export type CatalogStorageLocation = {
   sessionId: string;
   externalId: string;
   sourceInstallationId: string;
+  workingDirectory?: string;
   version: CatalogSessionVersion;
 };
 
@@ -160,11 +162,13 @@ const storageLocationSelection = {
   sessionId: schema.sessions.id,
   externalId: schema.sessions.externalId,
   sourceInstallationId: schema.sessions.sourceInstallationId,
+  workingDirectory: schema.sessions.workingDirectory,
   id: schema.sessionObjects.id,
   version: schema.sessionObjects.version,
   checksum: schema.sessionObjects.checksum,
   byteSize: schema.sessionObjects.byteSize,
   objectKey: schema.sessionObjects.objectKey,
+  originalFilename: schema.sessionObjects.originalFilename,
   storageVersionId: schema.sessionObjects.storageVersionId,
   contentType: schema.sessionObjects.contentType,
   storageStatus: schema.sessionObjects.storageStatus,
@@ -853,6 +857,27 @@ export class SessionCatalog {
     return storageLocationFromRow(row);
   }
 
+  async locateSessionObjectById(
+    ownerId: string,
+    sessionId: string,
+    version?: number,
+  ): Promise<CatalogStorageLocation | undefined> {
+    const [row] = await this.database
+      .select(storageLocationSelection)
+      .from(schema.sessions)
+      .innerJoin(schema.sessionObjects, eq(schema.sessionObjects.sessionId, schema.sessions.id))
+      .where(
+        and(
+          eq(schema.sessions.ownerId, ownerId),
+          eq(schema.sessions.id, sessionId),
+          version === undefined ? undefined : eq(schema.sessionObjects.version, version),
+        ),
+      )
+      .orderBy(desc(schema.sessionObjects.version))
+      .limit(1);
+    return row === undefined ? undefined : storageLocationFromRow(row);
+  }
+
   async listStorageObjectsForVerification(input: {
     ownerId: string;
     identifier?: string;
@@ -1111,11 +1136,13 @@ function storageLocationFromRow(row: {
   sessionId: string;
   externalId: string;
   sourceInstallationId: string;
+  workingDirectory: string | null;
   id: string;
   version: number;
   checksum: string;
   byteSize: number;
   objectKey: string;
+  originalFilename: string | null;
   storageVersionId: string | null;
   contentType: string;
   storageStatus: "verified" | "pending_deletion" | "deleted";
@@ -1129,12 +1156,14 @@ function storageLocationFromRow(row: {
     sessionId: row.sessionId,
     externalId: row.externalId,
     sourceInstallationId: row.sourceInstallationId,
+    ...(row.workingDirectory === null ? {} : { workingDirectory: row.workingDirectory }),
     version: {
       id: row.id,
       version: row.version,
       checksum: row.checksum,
       byteSize: row.byteSize,
       objectKey: row.objectKey,
+      ...(row.originalFilename === null ? {} : { originalFilename: row.originalFilename }),
       storageVersionId: row.storageVersionId,
       contentType: row.contentType,
       storageStatus: row.storageStatus,

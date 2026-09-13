@@ -5,6 +5,7 @@ import packageMetadata from "../package.json" with { type: "json" };
 import { createInterface } from "node:readline/promises";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { PiSessionRehydrationAdapter } from "./adapters/pi/pi-session-rehydration-adapter.js";
 import { PiSessionSource } from "./adapters/pi/pi-session-source.js";
 import {
   S3BucketProvisioner,
@@ -39,6 +40,8 @@ import { maintainDaemonLogs } from "./daemon/log-maintenance.js";
 import { SessionDaemon, type DaemonScanSummary } from "./daemon/session-daemon.js";
 import { runDoctor } from "./operations/doctor.js";
 import { restoreSessionObject } from "./operations/session-restorer.js";
+import { SessionRehydrator, type SessionRehydrationApplyResult } from "./rehydration/session-rehydrator.js";
+import type { RehydrationPlan } from "./rehydration/contracts.js";
 import {
   reconcileStorageVersionIds,
   type StorageVersionReconciliationReport,
@@ -481,8 +484,9 @@ async function dryRunSync(
 
 async function sessionsCommand(args: string[]): Promise<number> {
   const [action, ...actionArgs] = args;
+  if (action === "rehydrate") return sessionsRehydrateCommand(actionArgs);
   if (action !== "list" && action !== "show" && action !== "restore") {
-    throw new Error("sessions requires one of: list, show, restore");
+    throw new Error("sessions requires one of: list, show, restore, rehydrate");
   }
   const parsed = parseArgs({
     args: actionArgs,
@@ -578,6 +582,103 @@ async function sessionsCommand(args: string[]): Promise<number> {
   } finally {
     catalog.close();
   }
+}
+
+async function sessionsRehydrateCommand(args: string[]): Promise<number> {
+  const [action, ...actionArgs] = args;
+  if (action !== "plan" && action !== "apply") {
+    throw new Error("sessions rehydrate requires one of: plan, apply");
+  }
+  const parsed = parseArgs({
+    args: actionArgs,
+    allowPositionals: true,
+    options: {
+      config: { type: "string" },
+      json: { type: "boolean", default: false },
+      to: { type: "string" },
+      version: { type: "string" },
+      "session-root": { type: "string" },
+      yes: { type: "boolean", short: "y", default: false },
+    },
+  });
+  if (parsed.positionals.length !== 1) {
+    throw new Error(`sessions rehydrate ${action} requires exactly one catalog session ID`);
+  }
+  const targetHarness = parsed.values.to?.trim();
+  if (!targetHarness) throw new Error("sessions rehydrate requires --to <harness>");
+  if (action === "apply" && !parsed.values.yes) {
+    throw new Error("sessions rehydrate apply requires the explicit --yes flag");
+  }
+
+  const config = await loadConfig(parsed.values.config);
+  const databasePath = localDatabasePath(config.catalog.url);
+  if (databasePath && !(await fileExists(databasePath))) {
+    throw new Error(`Session catalog does not exist: ${databasePath}`);
+  }
+  const authToken = catalogAuthToken(config);
+  const catalog = new SessionCatalog({
+    url: config.catalog.url,
+    ...(authToken === undefined ? {} : { authToken }),
+  });
+  try {
+    const piAdapter = new PiSessionRehydrationAdapter({
+      ...(config.pi.sessionRoots === undefined ? {} : { sessionRoots: config.pi.sessionRoots }),
+    });
+    const rehydrator = new SessionRehydrator({
+      ownerId: config.ownerId,
+      catalog,
+      objectStore: createObjectStore(config),
+      adapters: new Map([["pi", piAdapter]]),
+    });
+    const request = {
+      sessionId: parsed.positionals[0]!,
+      targetHarness,
+      ...(parsed.values.version === undefined
+        ? {}
+        : { version: positiveInteger(parsed.values.version, "version") }),
+      ...(parsed.values["session-root"] === undefined
+        ? {}
+        : { sessionRoot: parsed.values["session-root"] }),
+    };
+    if (action === "plan") {
+      const plan = await rehydrator.plan(request);
+      printRehydrationPlan(plan, parsed.values.json);
+      return plan.status === "conflict" || plan.status === "unsupported" ? 1 : 0;
+    }
+
+    const result = await rehydrator.apply(request);
+    printRehydrationResult(result, parsed.values.json);
+    return 0;
+  } finally {
+    catalog.close();
+  }
+}
+
+function printRehydrationPlan(plan: RehydrationPlan, json: boolean): void {
+  if (json) {
+    process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+    return;
+  }
+  process.stdout.write(`Rehydration plan: ${plan.status}\n`);
+  process.stdout.write(`Harness: ${plan.harness}\n`);
+  process.stdout.write(`Session: ${plan.sessionId}\n`);
+  process.stdout.write(`External ID: ${plan.externalId}\n`);
+  process.stdout.write(`Session object: ${plan.sessionObjectId}\n`);
+  process.stdout.write(`SHA-256: ${plan.snapshotChecksum}\n`);
+  process.stdout.write(`Target: ${plan.targetPath ?? "-"}\n`);
+  for (const change of plan.changes) process.stdout.write(`CHANGE\t${change}\n`);
+  for (const warning of plan.warnings) process.stdout.write(`WARNING\t${warning}\n`);
+}
+
+function printRehydrationResult(result: SessionRehydrationApplyResult, json: boolean): void {
+  if (json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  process.stdout.write(`Rehydration ${result.status}: ${result.sessionId} v${result.version}\n`);
+  process.stdout.write(`Target: ${result.targetPath ?? "-"}\n`);
+  process.stdout.write(`SHA-256: ${result.checksum}\n`);
+  for (const warning of result.warnings) process.stdout.write(`WARNING\t${warning}\n`);
 }
 
 async function doctorCommand(args: string[]): Promise<number> {
@@ -1227,6 +1328,8 @@ function printUsage(): void {
   );
   process.stdout.write(`  sessions show <session-id> [--versions N] [--json]\n`);
   process.stdout.write(`  sessions restore <session-id> --output path [--version N] [--overwrite] [--json]\n`);
+  process.stdout.write(`  sessions rehydrate plan <session-id> --to pi [--version N] [--session-root path] [--json]\n`);
+  process.stdout.write(`  sessions rehydrate apply <session-id> --to pi --yes [--version N] [--session-root path] [--json]\n`);
   process.stdout.write(`  discover [--json]\n`);
   process.stdout.write(`  sync [--force] [--json]\n`);
   process.stdout.write(`  sync --dry-run [--limit N] [--json]\n`);

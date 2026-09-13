@@ -238,6 +238,38 @@ minu-sessions sessions restore <session-id> \
 
 The command does not automatically place files in Pi's session directory or register them with Pi. Choose and review such a destination explicitly. Restore depends on the catalog's exact object metadata; rebuilding a lost catalog from S3 alone is not yet implemented, so continue making catalog backups. Restoring a `pending_deletion` object is allowed while its exact S3 version remains available, but it may race the configured retention deadline; restore important versions before that deadline or pin them through a future supported workflow.
 
+## Rehydrate a Pi session
+
+Rehydration installs an exact verified Pi v3 snapshot into a Pi session root so Pi can discover it. It is not conversion: the archived bytes, working directory, IDs, and parent references are preserved unchanged.
+
+Preview a metadata-only plan first. The command requires the internal catalog session ID:
+
+```bash
+minu-sessions sessions rehydrate plan <session-id> --to pi
+minu-sessions sessions rehydrate plan <session-id> --to pi --version 3
+```
+
+If more than one usable Pi root exists, or you use a custom root, select an existing absolute directory explicitly:
+
+```bash
+minu-sessions sessions rehydrate plan <session-id> \
+  --to pi \
+  --session-root /absolute/path/to/pi/sessions
+```
+
+Apply the reviewed plan only with explicit confirmation:
+
+```bash
+minu-sessions sessions rehydrate apply <session-id> \
+  --to pi \
+  --session-root /absolute/path/to/pi/sessions \
+  --yes
+```
+
+The first release supports rehydrating Pi sessions on macOS only. Plan never downloads the snapshot or modifies Pi files. Apply requires an exact cataloged S3 `VersionId`, verifies the downloaded bytes, validates the Pi v3 header, uses private staging, and atomically publishes without overwriting. Existing identical bytes report `already_present`; every differing session ID or target collision is refused. Rehydration never creates a missing root, follows symlinks, rewrites `cwd`/`parentSession`, or changes catalog data. Use `--json` for metadata-only automation output.
+
+If a harness is unsupported, the safe fallback is ordinary `sessions restore --output <path>`, which restores the native file to a neutral user-chosen location. If planning reports no usable root or multiple roots, create/select one and pass an absolute `--session-root`. If it reports a conflict, do not delete, rename, or overwrite the existing Pi file; use ordinary restore to inspect the archived native snapshot instead. A failed apply leaves no published target. Successful rehydration has no automatic rollback because it never changes an existing file; remove the newly installed target manually only after closing Pi and reviewing the printed target path.
+
 ## Daemon operation
 
 Useful commands:

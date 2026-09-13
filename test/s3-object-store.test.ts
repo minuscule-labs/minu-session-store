@@ -204,6 +204,90 @@ describe("S3ObjectStore", () => {
     });
   });
 
+  it("rejects invalid retrieval metadata and destroys rejected response bodies", async () => {
+    const checksum = "f".repeat(64);
+    const objectKey = `sessions/local/ses_123/raw/${checksum}.jsonl`;
+    const cases: Array<{
+      name: string;
+      response: Record<string, unknown>;
+      error: string;
+      destroysBody: boolean;
+    }> = [
+      {
+        name: "a different version",
+        response: { VersionId: "s3-version-other" },
+        error: "VersionId mismatch",
+        destroysBody: true,
+      },
+      {
+        name: "a different size",
+        response: { ContentLength: 5 },
+        error: "size mismatch",
+        destroysBody: true,
+      },
+      {
+        name: "a different checksum",
+        response: { ChecksumSHA256: sha256HexToBase64("e".repeat(64)) },
+        error: "SHA-256 mismatch",
+        destroysBody: true,
+      },
+      {
+        name: "a different content type",
+        response: { ContentType: "text/plain" },
+        error: "content type mismatch",
+        destroysBody: true,
+      },
+      {
+        name: "a non-streaming body",
+        response: { Body: { destroy() {} } },
+        error: "body is unavailable",
+        destroysBody: true,
+      },
+      {
+        name: "a missing body",
+        response: { Body: undefined },
+        error: "body is unavailable",
+        destroysBody: false,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const destroy = vi.fn();
+      const body = {
+        async *[Symbol.asyncIterator]() {
+          yield Buffer.from("test");
+        },
+        destroy,
+      };
+      const response: Record<string, unknown> = {
+        Body: body,
+        ContentLength: 4,
+        ContentType: "application/x-ndjson",
+        ChecksumSHA256: sha256HexToBase64(checksum),
+        ServerSideEncryption: "AES256",
+        VersionId: "s3-version-3",
+        ...testCase.response,
+      };
+      if (testCase.name === "a non-streaming body") response.Body = { destroy };
+      const store = new S3ObjectStore({
+        bucket: "sessions",
+        client: { send: vi.fn(async () => response) } as unknown as S3Client,
+      });
+
+      await expect(
+        store.retrieveVersion({
+          objectKey,
+          checksum,
+          byteSize: 4,
+          contentType: "application/x-ndjson",
+          storageVersionId: "s3-version-3",
+        }),
+        testCase.name,
+      ).rejects.toThrow(testCase.error);
+      expect(destroy).toHaveBeenCalledTimes(testCase.destroysBody ? 1 : 0);
+    }
+  });
+
   it("deletes and verifies one exact S3 object version", async () => {
     const send = vi.fn(async (command: unknown) => {
       if (command instanceof DeleteObjectCommand) return {};

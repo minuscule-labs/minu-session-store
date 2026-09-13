@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CatalogStorageLocation } from "../src/catalog/session-catalog.js";
 import type { RetrievableObjectStore } from "../src/core/contracts.js";
-import { restoreSessionObject } from "../src/operations/session-restorer.js";
+import {
+  restoreSessionObject,
+  retrieveVerifiedSessionObject,
+} from "../src/operations/session-restorer.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -118,6 +121,84 @@ describe("restoreSessionObject", () => {
       }),
     ).rejects.toThrow("deleted from storage");
   });
+
+  it("provides a verified private staging file that callers dispose", async () => {
+    const directory = await temporaryDirectory();
+    const content = Buffer.from("verified staging\n");
+    const restored = await retrieveVerifiedSessionObject({
+      target: storageTarget(content),
+      objectStore: objectStore(async () => ({
+        storageVersionId: "s3-version-1",
+        content: chunks(content),
+      })),
+      stagingDirectory: directory,
+      filename: "session.jsonl",
+    });
+
+    expect(await readFile(restored.path)).toEqual(content);
+    expect((await stat(restored.path)).mode & 0o777).toBe(0o600);
+    await restored.dispose();
+    await expect(stat(restored.path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("cleans staging after retrieval and verification failures", async () => {
+    const directory = await temporaryDirectory();
+    const content = Buffer.from("authoritative\n");
+    const cases = [
+      objectStore(async () => {
+        throw new Error("retrieve failed");
+      }),
+      objectStore(async () => ({
+        storageVersionId: "s3-version-1",
+        content: chunks(Buffer.from("tampered\n")),
+      })),
+      objectStore(async () => ({
+        storageVersionId: "s3-version-1",
+        content: invalidChunks(),
+      })),
+    ];
+
+    for (const store of cases) {
+      await expect(
+        retrieveVerifiedSessionObject({
+          target: storageTarget(content),
+          objectStore: store,
+          stagingDirectory: directory,
+        }),
+      ).rejects.toThrow();
+      await expectNoRestoreStaging(directory);
+    }
+
+    await expect(
+      retrieveVerifiedSessionObject({
+        target: storageTarget(content),
+        objectStore: cases[0]!,
+        stagingDirectory: directory,
+        filename: "/",
+      }),
+    ).rejects.toThrow("staging filename");
+    await expectNoRestoreStaging(directory);
+  });
+
+  it("cleans staging when publication fails", async () => {
+    const directory = await temporaryDirectory();
+    const destination = join(directory, "session.jsonl");
+    const content = Buffer.from("authoritative\n");
+
+    await expect(
+      restoreSessionObject({
+        target: storageTarget(content),
+        objectStore: objectStore(async () => {
+          await writeFile(destination, "concurrent destination");
+          return { storageVersionId: "s3-version-1", content: chunks(content) };
+        }),
+        destinationPath: destination,
+      }),
+    ).rejects.toThrow("already exists");
+
+    expect(await readFile(destination, "utf8")).toBe("concurrent destination");
+    await expectNoRestoreStaging(directory);
+  });
 });
 
 function objectStore(
@@ -166,6 +247,14 @@ async function* chunks(content: Buffer, size = content.length): AsyncIterable<Ui
   for (let offset = 0; offset < content.length; offset += size) {
     yield content.subarray(offset, Math.min(offset + size, content.length));
   }
+}
+
+async function* invalidChunks(): AsyncIterable<Uint8Array> {
+  yield "not bytes" as unknown as Uint8Array;
+}
+
+async function expectNoRestoreStaging(directory: string): Promise<void> {
+  expect((await readdir(directory)).filter((name) => name.startsWith(".minu-restore-"))).toEqual([]);
 }
 
 async function temporaryDirectory(): Promise<string> {

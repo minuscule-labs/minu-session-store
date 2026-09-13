@@ -5,14 +5,14 @@ import {
   lstat,
   mkdtemp,
   open,
-  readFile,
   realpath,
   readdir,
   rm,
   stat,
 } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { resolvePiSessionRoots } from "./pi-session-roots.js";
 import type {
   CapturedSession,
   DiscoverSessionsInput,
@@ -69,7 +69,7 @@ export class PiSessionSource implements SessionSourceAdapter {
   }
 
   async *discover(input: DiscoverSessionsInput = {}): AsyncIterable<DiscoveredSession> {
-    const roots = await this.resolveSessionRoots();
+    const roots = await resolvePiSessionRoots(this.options);
     const candidatesByPath = new Map<string, DiscoveredSession>();
 
     for (const root of roots) {
@@ -168,26 +168,6 @@ export class PiSessionSource implements SessionSourceAdapter {
       await rm(captureDirectory, { recursive: true, force: true });
       throw error;
     }
-  }
-
-  private async resolveSessionRoots(): Promise<string[]> {
-    if (this.options.sessionRoots?.length) {
-      return uniqueResolvedPaths(this.options.sessionRoots);
-    }
-
-    const agentDirectory = resolveTilde(
-      this.options.agentDirectory ?? process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"),
-    );
-    const roots = new Set<string>();
-    roots.add(resolve(agentDirectory, "sessions"));
-
-    const environmentRoot = process.env.PI_CODING_AGENT_SESSION_DIR;
-    if (environmentRoot) roots.add(resolveTilde(environmentRoot));
-
-    const configuredRoot = await readConfiguredSessionRoot(join(agentDirectory, "settings.json"));
-    if (configuredRoot) roots.add(configuredRoot);
-
-    return [...roots].sort();
   }
 
   private async *walkSessionFiles(root: string): AsyncIterable<string> {
@@ -431,28 +411,6 @@ function parsePiSessionHeader(value: unknown): PiSessionHeader | null {
     ...(typeof value.timestamp === "string" ? { timestamp: value.timestamp } : {}),
     ...(typeof value.cwd === "string" ? { cwd: value.cwd } : {}),
   };
-}
-
-async function readConfiguredSessionRoot(settingsPath: string): Promise<string | undefined> {
-  try {
-    const settings = JSON.parse(await readFile(settingsPath, "utf8")) as unknown;
-    if (!isRecord(settings) || typeof settings.sessionDir !== "string" || !settings.sessionDir.trim()) {
-      return undefined;
-    }
-    return resolve(dirname(settingsPath), resolveTilde(settings.sessionDir));
-  } catch {
-    return undefined;
-  }
-}
-
-function uniqueResolvedPaths(paths: string[]): string[] {
-  return [...new Set(paths.map((path) => resolveTilde(path)))].sort();
-}
-
-function resolveTilde(path: string): string {
-  if (path === "~") return homedir();
-  if (path.startsWith("~/")) return resolve(homedir(), path.slice(2));
-  return isAbsolute(path) ? resolve(path) : resolve(path);
 }
 
 function isWithinRoot(root: string, candidate: string): boolean {
